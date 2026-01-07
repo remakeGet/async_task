@@ -4,7 +4,7 @@ from sqlalchemy import String, Integer
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-POSTGRES_USER = os.getenv("POSTGRES_USER", "get")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "user")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "swapi")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
