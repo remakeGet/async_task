@@ -9,6 +9,39 @@ from models import DbSession, SwapiPeople, close_orm, init_orm
 MAX_REQUESTS = 10
 API_BASE_URL = "https://www.swapi.tech/api/people/"
 
+async def get_name_from_url(url: str, http_session: aiohttp.ClientSession):
+    """Получает название по URL (для планет, фильмов и т.д.)"""
+    if not url:
+        return ""
+    
+    try:
+        async with http_session.get(url) as response:
+            if response.status == 200:
+                json_data = await response.json()
+                if json_data and "result" in json_data:
+                    result = json_data["result"]
+                    properties = result.get("properties", {})
+
+                    if "/films/" in url:
+                        name = properties.get("title", "")
+                    else:
+                        name = properties.get("name", "")
+                    return name
+    except Exception as e:
+        print(f"Ошибка при получении названия по URL {url}: {e}")
+    
+    return ""
+
+
+async def get_names_from_urls(urls: list, http_session: aiohttp.ClientSession):
+    """Получает список названий из списка URL"""
+    if not urls:
+        return []
+    
+    tasks = [get_name_from_url(url, http_session) for url in urls]
+    names = await asyncio.gather(*tasks)
+    # Фильтруем пустые названия
+    return [name for name in names if name]
 
 async def get_people(person_id, http_session):
     try:
@@ -27,7 +60,7 @@ async def get_people(person_id, http_session):
         return None
 
 
-def extract_person_data(json_data):
+async def extract_person_data(json_data, http_session):
     """Извлекает нужные поля из ответа API"""
     if not json_data or "result" not in json_data:
         return None
@@ -35,16 +68,40 @@ def extract_person_data(json_data):
     result = json_data["result"]
     properties = result.get("properties", {})
     
+     # Получаем название планеты (а не ссылку)
+    homeworld_url = properties.get("homeworld")
+    homeworld_name = ""
+    if homeworld_url:
+        homeworld_name = await get_name_from_url(homeworld_url, http_session)
+    
+    # Получаем названия для списков
+    films_urls = properties.get("films", [])
+    species_urls = properties.get("species", [])
+    starships_urls = properties.get("starships", [])
+    vehicles_urls = properties.get("vehicles", [])
+    
+    # Получаем все названия параллельно
+    films_names, species_names, starships_names, vehicles_names = await asyncio.gather(
+        get_names_from_urls(films_urls, http_session),
+        get_names_from_urls(species_urls, http_session),
+        get_names_from_urls(starships_urls, http_session),
+        get_names_from_urls(vehicles_urls, http_session)
+    )
+    
     return {
         "id": result.get("uid"),
         "birth_year": properties.get("birth_year"),
         "eye_color": properties.get("eye_color"),
         "gender": properties.get("gender"),
         "hair_color": properties.get("hair_color"),
-        "homeworld": properties.get("homeworld"),
+        "homeworld": homeworld_name,
         "mass": properties.get("mass"),
         "name": properties.get("name"),
         "skin_color": properties.get("skin_color"),
+        "films": ", ".join(films_names),  # замечание
+        "species": ", ".join(species_names),  # замечание
+        "starships": ", ".join(starships_names),  # замечание
+        "vehicles": ", ".join(vehicles_names),  # замечание
     }
 
 
@@ -67,6 +124,10 @@ async def insert_people(people_data_list: list[dict]):
                         mass=person_data["mass"],
                         name=person_data["name"],
                         skin_color=person_data["skin_color"],
+                        films=person_data["films"],
+                        species=person_data["species"],
+                        starships=person_data["starships"],
+                        vehicles=person_data["vehicles"],
                     )
                     session.add(swapi_person)
                 except Exception as e:
@@ -106,8 +167,10 @@ async def main():
             coros = [get_people(i, http_session) for i in people_ids_chunk]
             results = await asyncio.gather(*coros)
             
-            # Извлекаем нужные данные
-            people_data = [extract_person_data(r) for r in results]
+            # Извлекаем нужные данные (теперь асинхронно, чтобы делать доп. запросы)
+            extract_coros = [extract_person_data(r, http_session) for r in results]
+            people_data = await asyncio.gather(*extract_coros)
+            
             # Фильтруем None
             valid_people_data = [p for p in people_data if p]
             
